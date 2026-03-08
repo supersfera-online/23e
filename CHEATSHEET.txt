@@ -1,0 +1,74 @@
+QUICK REFERENCE - 50M STEPS
+
+SPECS:
+✓ 50,000,000 steps
+✓ 100 agents (HRL/Meta/A2C mix)
+✓ 200x200 world
+✓ 2M episode memory
+✓ 2048 batch size
+✓ GPU accelerated (ROCm)
+
+INSTALL ROCM:
+wget https://repo.radeon.com/amdgpu-install/6.2/ubuntu/jammy/amdgpu-install_6.2.60200-1_all.deb
+sudo apt install ./amdgpu-install_6.2.60200-1_all.deb
+sudo amdgpu-install --usecase=rocm
+sudo usermod -aG render,video $USER
+# REBOOT
+
+VERIFY GPU:
+rocm-smi
+python3 -c "import torch; print(torch.cuda.is_available())"
+
+INSTALL PYTORCH:
+pip3 install torch --index-url https://download.pytorch.org/whl/rocm6.2
+
+SETUP ENV:
+export LIBTORCH=$(python3 -c "import torch; print(torch.__path__[0])")
+export LD_LIBRARY_PATH=$LIBTORCH/lib:$LD_LIBRARY_PATH
+export LIBTORCH_USE_PYTORCH=1
+
+ADD TO ~/.bashrc:
+export LIBTORCH=/path/to/torch
+export LD_LIBRARY_PATH=$LIBTORCH/lib:$LD_LIBRARY_PATH
+export LIBTORCH_USE_PYTORCH=1
+
+CARGO.TOML:
+[dependencies]
+tch = "0.16"
+rand = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+
+FILES:
+src/main.rs          <- FINAL_INTEGRATION_50M.rs
+src/pfc_planner.rs   <- pfc_planner.rs
+
+RUN:
+cargo run --release
+
+BACKGROUND:
+nohup cargo run --release > training.log 2>&1 &
+tail -f training.log
+
+MONITOR:
+watch -n 5 'rocm-smi && tail -20 training.log'
+
+RESUME:
+LOAD_CHECKPOINT=1 cargo run --release
+
+EXPECTED TIME: 18-45 hours (GPU), 3-7 days (CPU)
+VRAM USAGE: 18-28GB
+RAM USAGE: 120-160GB
+DISK SPACE: ~200GB
+
+CHECKPOINTS: Every 1M steps → checkpoints/agent_X_step_Y.pt
+
+TROUBLESHOOT:
+Device: Cpu → export HSA_OVERRIDE_GFX_VERSION=11.0.0
+OOM VRAM → reduce HIDDEN_DIM/BATCH_SIZE/NUM_AGENTS
+Slow → increase BATCH_SIZE, check rocm-smi
+
+SCALE TO 100M:
+const NUM_STEPS: usize = 100_000_000;

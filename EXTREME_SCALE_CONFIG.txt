@@ -1,0 +1,299 @@
+EXTREME SCALE CONFIGURATION
+AMD 9950X (16c/32t) + 192GB RAM + Radeon PRO W7900 32GB
+
+HARDWARE UTILIZATION:
+
+CPU: 16 cores → 8-16 parallel environments
+RAM: 192GB → massive replay buffers
+GPU: 32GB VRAM → all models on GPU + large batches
+
+CONFIGURATION LEVELS:
+
+=== LEVEL 1: MODERATE (1-2 days) ===
+const NUM_STEPS: usize = 5_000_000;
+const NUM_AGENTS: usize = 50;
+const WORLD_SIZE: (i32, i32) = (100, 100);
+const BATCH_SIZE: usize = 1024;
+const MEMORY_SIZE: usize = 500_000;
+const HIDDEN_DIM: i64 = 256;
+const NUM_SKILLS: usize = 16;
+
+Expected time: 12-36 hours
+RAM usage: ~80GB
+VRAM usage: ~15GB
+
+=== LEVEL 2: AGGRESSIVE (3-7 days) ===
+const NUM_STEPS: usize = 50_000_000;
+const NUM_AGENTS: usize = 100;
+const WORLD_SIZE: (i32, i32) = (200, 200);
+const BATCH_SIZE: usize = 2048;
+const MEMORY_SIZE: usize = 2_000_000;
+const HIDDEN_DIM: i64 = 512;
+const NUM_SKILLS: usize = 32;
+
+Expected time: 3-7 days
+RAM usage: ~150GB
+VRAM usage: ~25GB
+
+=== LEVEL 3: EXTREME (1-4 weeks) ===
+const NUM_STEPS: usize = 100_000_000;
+const NUM_AGENTS: usize = 200;
+const WORLD_SIZE: (i32, i32) = (500, 500);
+const BATCH_SIZE: usize = 4096;
+const MEMORY_SIZE: usize = 5_000_000;
+const HIDDEN_DIM: i64 = 1024;
+const NUM_SKILLS: usize = 64;
+
+Expected time: 1-4 weeks
+RAM usage: ~180GB
+VRAM usage: ~30GB
+
+GPU SETUP (CRITICAL):
+
+1. Install ROCm:
+```bash
+sudo apt update
+sudo apt install rocm-hip-sdk rocm-libs
+```
+
+2. Verify GPU:
+```bash
+rocm-smi
+rocminfo | grep "Name:"
+```
+
+3. Install PyTorch with ROCm:
+```bash
+pip3 install torch --index-url https://download.pytorch.org/whl/rocm6.2
+python3 -c "import torch; print(torch.cuda.is_available())"
+```
+
+4. Build tch-rs with ROCm:
+Add to .cargo/config.toml:
+```toml
+[env]
+LIBTORCH_USE_PYTORCH = "1"
+```
+
+5. In code:
+```rust
+let device = Device::cuda_if_available();
+let mut vs = VarStore::new(device);
+```
+
+PARALLEL ENVIRONMENTS (16 cores):
+
+```rust
+use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
+
+const NUM_PARALLEL_ENVS: usize = 8;
+
+let shared_agents = Arc::new(Mutex::new(agents));
+
+(0..NUM_PARALLEL_ENVS).into_par_iter().for_each(|env_id| {
+    let mut local_world = GridWorld::new(WORLD_SIZE);
+    for local_step in 0..STEPS_PER_ENV {
+        let mut agents = shared_agents.lock().unwrap();
+        // Run steps
+    }
+});
+```
+
+MEMORY OPTIMIZATION:
+
+```rust
+pub struct EpisodicMemory {
+    buffer: VecDeque<Episode>,
+    max_size: usize,
+}
+
+impl EpisodicMemory {
+    pub fn new(max_size: usize) -> Self {
+        EpisodicMemory {
+            buffer: VecDeque::with_capacity(max_size),
+            max_size,
+        }
+    }
+    
+    pub fn add_experience(&mut self, episode: Episode) {
+        if self.buffer.len() >= self.max_size {
+            self.buffer.pop_front();
+        }
+        self.buffer.push_back(episode);
+    }
+    
+    pub fn sample_batch(&self, batch_size: usize) -> Vec<Episode> {
+        use rand::seq::SliceRandom;
+        let mut rng = thread_rng();
+        self.buffer.iter()
+            .choose_multiple(&mut rng, batch_size)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+}
+```
+
+BATCH TRAINING:
+
+```rust
+pub fn update(&mut self, batch_size: usize) {
+    if self.episodic_memory.buffer.len() < batch_size {
+        return;
+    }
+    
+    let batch = self.episodic_memory.sample_batch(batch_size);
+    
+    let states: Vec<_> = batch.iter().map(|e| &e.state.observation).collect();
+    let actions: Vec<_> = batch.iter().map(|e| e.action).collect();
+    let rewards: Vec<_> = batch.iter().map(|e| e.reward).collect();
+    let next_states: Vec<_> = batch.iter().map(|e| &e.next_state.observation).collect();
+    
+    // Batch tensor operations
+    let state_tensor = Tensor::cat(&states.iter().map(|s| Tensor::of_slice(s)).collect::<Vec<_>>(), 0);
+    // ... compute losses on GPU
+}
+```
+
+MONITORING & LOGGING:
+
+```rust
+use std::time::Instant;
+use std::fs::OpenOptions;
+use std::io::Write;
+
+struct TrainingStats {
+    start_time: Instant,
+    steps_completed: usize,
+    total_reward: f32,
+    avg_dopamine: f32,
+    avg_serotonin: f32,
+    social_events: usize,
+}
+
+impl TrainingStats {
+    fn log_to_file(&self, step: usize) {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("training_log.csv")
+            .unwrap();
+        
+        writeln!(file, "{},{},{:.2},{:.3},{:.3},{}", 
+                 step, 
+                 self.steps_completed,
+                 self.total_reward,
+                 self.avg_dopamine,
+                 self.avg_serotonin,
+                 self.social_events).unwrap();
+    }
+    
+    fn print_eta(&self, current_step: usize, total_steps: usize) {
+        let elapsed = self.start_time.elapsed().as_secs_f32();
+        let steps_per_sec = current_step as f32 / elapsed;
+        let remaining_secs = (total_steps - current_step) as f32 / steps_per_sec;
+        
+        println!("Speed: {:.1} steps/sec | ETA: {:.1} hours", 
+                 steps_per_sec, remaining_secs / 3600.0);
+    }
+}
+```
+
+CHECKPOINT COMPRESSION:
+
+```rust
+use flate2::Compression;
+use flate2::write::GzEncoder;
+
+fn save_compressed_checkpoint(vs: &VarStore, path: &str) {
+    let temp_path = format!("{}.tmp", path);
+    vs.save(&temp_path).unwrap();
+    
+    let input = std::fs::read(&temp_path).unwrap();
+    let compressed_path = format!("{}.gz", path);
+    let mut encoder = GzEncoder::new(
+        std::fs::File::create(&compressed_path).unwrap(),
+        Compression::best()
+    );
+    encoder.write_all(&input).unwrap();
+    
+    std::fs::remove_file(&temp_path).unwrap();
+}
+```
+
+Add to Cargo.toml:
+```toml
+flate2 = "1.0"
+rayon = "1.8"
+```
+
+NVME/SSD OPTIMIZATION:
+
+```bash
+# Use fast storage for checkpoints
+mkdir -p /mnt/nvme/personality_checkpoints
+ln -s /mnt/nvme/personality_checkpoints checkpoints
+```
+
+SYSTEM TUNING:
+
+```bash
+# Increase file descriptors
+ulimit -n 65536
+
+# Disable CPU throttling
+sudo cpupower frequency-set -g performance
+
+# Monitor during training
+watch -n 1 'rocm-smi && free -h && ps aux | grep cargo'
+```
+
+RECOMMENDED START:
+
+1. Test GPU first (100k steps, 5 agents):
+```rust
+const NUM_STEPS: usize = 100_000;
+const NUM_AGENTS: usize = 5;
+let device = Device::cuda_if_available();
+println!("Using device: {:?}", device);
+```
+
+2. If GPU works, go to LEVEL 1 (5M steps, 50 agents)
+
+3. Then LEVEL 2 (50M steps, 100 agents)
+
+4. Finally LEVEL 3 if you want weeks-long run
+
+EXPECTED OUTCOMES:
+
+With this scale, you should see:
+- Emergent social hierarchies
+- Stable personality traits
+- Complex cooperation patterns
+- Neurochemical homeostasis
+- Skill specialization
+- Theory of Mind convergence
+
+DISK SPACE:
+
+- Checkpoints: ~50GB (100 agents × 500MB each)
+- Logs: ~5-10GB
+- Total: ~60GB (ensure free space)
+
+TROUBLESHOOTING:
+
+GPU not detected:
+```bash
+HSA_OVERRIDE_GFX_VERSION=11.0.0 cargo run --release
+```
+
+Out of VRAM:
+- Reduce BATCH_SIZE
+- Reduce HIDDEN_DIM
+- Reduce NUM_AGENTS
+
+Training too slow:
+- Enable GPU
+- Increase batch size
+- Reduce logging frequency

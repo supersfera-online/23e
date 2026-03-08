@@ -1,0 +1,235 @@
+READY TO RUN: 50M STEPS ON AMD 9950X + W7900
+
+FILE: FINAL_INTEGRATION_50M.rs
+
+CONFIGURATION:
+- 50 million steps (~3-7 days training)
+- 100 agents (HRL:33, Meta:33, A2C:34)
+- 200x200 world
+- 32 skills per HRL agent
+- 512-dim hidden layers
+- 2048 batch size
+- 2M episode memory per agent
+- GPU-accelerated (ROCm)
+
+GPU SETUP (ROCm for AMD W7900):
+
+1. Install ROCm 6.2:
+```bash
+wget https://repo.radeon.com/amdgpu-install/6.2/ubuntu/jammy/amdgpu-install_6.2.60200-1_all.deb
+sudo apt install ./amdgpu-install_6.2.60200-1_all.deb
+sudo amdgpu-install --usecase=rocm
+sudo usermod -aG render,video $USER
+# Reboot
+```
+
+2. Verify GPU:
+```bash
+rocm-smi
+rocminfo | grep "Name:"
+# Should show: gfx1100 (W7900)
+```
+
+3. Install PyTorch with ROCm:
+```bash
+pip3 install torch --index-url https://download.pytorch.org/whl/rocm6.2
+python3 -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}')"
+# Should print: CUDA available: True, Device: AMD Radeon PRO W7900
+```
+
+4. Setup tch-rs:
+```bash
+# Get libtorch path
+python3 -c "import torch; print(torch.__path__[0])"
+export LIBTORCH=/path/from/above
+export LD_LIBRARY_PATH=$LIBTORCH/lib:$LD_LIBRARY_PATH
+```
+
+Add to ~/.bashrc:
+```bash
+export LIBTORCH=/path/to/torch
+export LD_LIBRARY_PATH=$LIBTORCH/lib:$LD_LIBRARY_PATH
+export LIBTORCH_USE_PYTORCH=1
+```
+
+5. Update Cargo.toml:
+```toml
+[dependencies]
+tch = "0.16"  # Latest version
+rand = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+```
+
+PROJECT STRUCTURE:
+```
+personality_rl/
+├── Cargo.toml
+├── src/
+│   ├── main.rs          <- Rename FINAL_INTEGRATION_50M.rs
+│   └── pfc_planner.rs   <- From previous files
+└── checkpoints/         <- Auto-created
+```
+
+RUN:
+
+First test (verify GPU):
+```bash
+cargo build --release
+cargo run --release 2>&1 | head -20
+# Look for: "Device: Cuda(0)"
+```
+
+Full training:
+```bash
+nohup cargo run --release > training.log 2>&1 &
+tail -f training.log
+```
+
+Monitor:
+```bash
+watch -n 5 'rocm-smi && echo "---" && tail -20 training.log'
+```
+
+EXPECTED OUTPUT:
+
+```
+=== EXTREME SCALE: 50M steps, 100 agents, 200x200 world ===
+Hardware: AMD 9950X + 192GB RAM + Radeon PRO W7900 32GB
+Device: Cuda(0)
+
+100 Agents initialized:
+HRL: ~33, Meta-L: ~33, A2C: ~34
+ToM enabled: ~50 agents
+
+=== STEP 0/50000000 (0.0%) ===
+Speed: 450.2 steps/s | Elapsed: 0.0h | ETA: 30.9h
+Population avg: DA=0.500 5HT=0.500 Cort=0.200 | Safety=0.500 Social=0.500
+Social events: 0
+  A0: HRL Act=0 DA=0.50 5HT=0.50 S=0
+  A1: MetaL Act=1 DA=0.50 5HT=0.50 S=N
+  A50: A2C Act=2 DA=0.50 5HT=0.50 S=N
+  A99: HRL Act=0 DA=0.50 5HT=0.50 S=1
+
+=== STEP 100000/50000000 (0.2%) ===
+Speed: 523.7 steps/s | Elapsed: 0.1h | ETA: 26.5h
+...
+
+Saving checkpoints at step 1000000...
+Checkpoints saved for 100 agents
+
+...
+
+=== TRAINING COMPLETE: 50000000 steps ===
+Total time: 28.34 hours
+
+Saving final weights...
+Final weights saved for 100 agents
+```
+
+PERFORMANCE EXPECTATIONS:
+
+With GPU (W7900):
+- Speed: 300-800 steps/sec
+- Training time: 18-45 hours (depends on optimization)
+- VRAM usage: 18-28GB
+- RAM usage: 120-160GB
+
+Without GPU (CPU only):
+- Speed: 50-150 steps/sec
+- Training time: 3-7 days
+- RAM usage: 120-160GB
+
+CHECKPOINTS:
+
+Auto-saved every 1M steps:
+- checkpoints/agent_0_step_1000000.pt
+- checkpoints/agent_1_step_1000000.pt
+- ...
+- checkpoints/agent_99_step_1000000.pt
+
+Total checkpoint size: ~10-15GB per save
+Disk space needed: ~200GB (for all checkpoints)
+
+RESUME TRAINING:
+
+```bash
+LOAD_CHECKPOINT=1 cargo run --release
+```
+
+SCALE UP TO 100M:
+
+Edit main.rs:
+```rust
+const NUM_STEPS: usize = 100_000_000;
+const SAVE_INTERVAL: usize = 5_000_000;
+```
+
+TROUBLESHOOTING:
+
+"Device: Cpu" instead of "Device: Cuda(0)":
+```bash
+# Check PyTorch
+python3 -c "import torch; print(torch.cuda.is_available())"
+
+# If False, reinstall PyTorch with ROCm
+pip3 uninstall torch
+pip3 install torch --index-url https://download.pytorch.org/whl/rocm6.2
+
+# Set env vars
+export LIBTORCH_USE_PYTORCH=1
+export HSA_OVERRIDE_GFX_VERSION=11.0.0  # For W7900
+```
+
+Out of VRAM:
+- Reduce HIDDEN_DIM to 256
+- Reduce BATCH_SIZE to 1024
+- Reduce NUM_AGENTS to 50
+
+Slow training:
+- Check GPU usage: rocm-smi (should show ~90%+ utilization)
+- Increase BATCH_SIZE to 4096
+- Reduce LOG_INTERVAL to 500000
+
+DISK I/O:
+
+Use fast storage for checkpoints:
+```bash
+# If you have NVMe
+mkdir -p /mnt/nvme/checkpoints
+ln -s /mnt/nvme/checkpoints checkpoints
+
+# Monitor I/O
+iostat -x 5
+```
+
+ANALYSIS AFTER TRAINING:
+
+You'll have:
+1. 100 trained agents with different architectures
+2. Behavioral logs showing neurochemical dynamics
+3. Checkpoints at 1M, 2M, ..., 50M steps
+4. Social interaction patterns
+5. Emergent personality traits
+
+Next steps for analysis:
+- Compare HRL vs Meta-Learning vs A2C performance
+- Extract learned skills from HRL agents
+- Analyze ToM cooperation patterns
+- Visualize neurochemical trajectories
+- Test agents in new environments
+
+EXPECTED SCIENTIFIC OUTCOMES:
+
+With 50M steps and 100 agents:
+- Stable homeostatic regulation
+- Emergent social hierarchies
+- Specialized behavioral strategies
+- Theory of Mind convergence
+- Skill differentiation in HRL agents
+- Neurochemical adaptation patterns
+
+This is sufficient scale to observe personality-like behaviors emerging from the computational substrate.
