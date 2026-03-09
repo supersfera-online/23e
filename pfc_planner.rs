@@ -1,5 +1,15 @@
-use std::collections::{BinaryHeap, HashMap, HashSet};
+// ======================================================================
+// ЭТАП 2: + PFC Planner (Prefrontal Cortex — Goal-Oriented Action Planning)
+// Источник: pfc_planner.rs (оригинальный файл)
+// Добавлено: derive_world_state теперь СОВМЕСТИМ с богатой нейрохимией
+//   из neurochemistry.rs (а не с упрощёнными f32 заглушками)
+// ======================================================================
+
 use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
+
+use crate::homeostasis::HomeostaticState;
+use crate::neurochemistry::NeurochemicalState;
 
 #[derive(Debug, Clone)]
 pub struct ValueRule {
@@ -16,7 +26,12 @@ impl ValueRule {
         effects: &'static [&'static str],
         mass: f32,
     ) -> Self {
-        ValueRule { name, preconditions, effects, mass }
+        ValueRule {
+            name,
+            preconditions,
+            effects,
+            mass,
+        }
     }
 }
 
@@ -44,7 +59,10 @@ impl PartialOrd for SearchNode {
 
 impl Ord for SearchNode {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.priority.partial_cmp(&self.priority).unwrap_or(Ordering::Equal)
+        other
+            .priority
+            .partial_cmp(&self.priority)
+            .unwrap_or(Ordering::Equal)
     }
 }
 
@@ -59,66 +77,114 @@ impl PfcPlanner {
 
     pub fn default_personality() -> Self {
         PfcPlanner::new(vec![
-            ValueRule::new("meet_safety_need",    &["unsafe"],          &["safety_met"],       2.0),
-            ValueRule::new("seek_social_bond",    &["isolated"],        &["social_met"],       1.5),
-            ValueRule::new("reduce_stress",       &["under_threat"],    &["stress_reduced"],   2.5),
-            ValueRule::new("explore_novelty",     &["curious", "safe"], &["knowledge_gained"], 1.0),
-            ValueRule::new("exploit_reward",      &["reward_signal"],   &["reward_obtained"],  1.0),
-            ValueRule::new("cooperate",           &["social_met"],      &["cooperation_done"], 1.2),
-            ValueRule::new("consolidate_memory",  &["knowledge_gained"], &["experience_stored"], 0.8),
-            ValueRule::new("restore_homeostasis", &["stress_reduced", "safety_met"], &["homeostasis_stable"], 3.0),
+            ValueRule::new(
+                "meet_safety_need",
+                &["unsafe"],
+                &["safety_met"],
+                2.0,
+            ),
+            ValueRule::new(
+                "seek_social_bond",
+                &["isolated"],
+                &["social_met"],
+                1.5,
+            ),
+            ValueRule::new(
+                "reduce_stress",
+                &["under_threat"],
+                &["stress_reduced"],
+                2.5,
+            ),
+            ValueRule::new(
+                "explore_novelty",
+                &["curious", "safe"],
+                &["knowledge_gained"],
+                1.0,
+            ),
+            ValueRule::new(
+                "exploit_reward",
+                &["reward_signal"],
+                &["reward_obtained"],
+                1.0,
+            ),
+            ValueRule::new(
+                "cooperate",
+                &["social_met"],
+                &["cooperation_done"],
+                1.2,
+            ),
+            ValueRule::new(
+                "consolidate_memory",
+                &["knowledge_gained"],
+                &["experience_stored"],
+                0.8,
+            ),
+            ValueRule::new(
+                "restore_homeostasis",
+                &["stress_reduced", "safety_met"],
+                &["homeostasis_stable"],
+                3.0,
+            ),
         ])
     }
 
+    /// Конвертирует РЕАЛЬНУЮ богатую нейрохимию + гомеостаз в символьное состояние мира
+    /// Использует neurochemistry.rs (регионы, рецепторы) — не упрощённые f32
     pub fn derive_world_state(
-        cortisol: f32,
-        dopamine: f32,
-        serotonin: f32,
-        safety: f32,
-        social_connection: f32,
-        curiosity: f32,
+        neuro: &NeurochemicalState,
+        homeo: &HomeostaticState,
     ) -> HashSet<String> {
         let mut state = HashSet::new();
 
-        if safety < 0.3 {
-            state.insert("unsafe".to_string());
+        let cortisol = neuro.cortisol_level();
+        let dopamine = neuro.dopamine_level();
+        let serotonin = neuro.serotonin_level();
+
+        if homeo.safety < 0.3 {
+            state.insert("unsafe".into());
         } else {
-            state.insert("safe".to_string());
+            state.insert("safe".into());
         }
 
-        if social_connection < 0.3 {
-            state.insert("isolated".to_string());
+        if homeo.social_connection < 0.3 {
+            state.insert("isolated".into());
         } else {
-            state.insert("social_met".to_string());
+            state.insert("social_met".into());
         }
 
         if cortisol > 0.6 {
-            state.insert("under_threat".to_string());
+            state.insert("under_threat".into());
         } else {
-            state.insert("stress_reduced".to_string());
+            state.insert("stress_reduced".into());
         }
 
-        if curiosity > 0.5 {
-            state.insert("curious".to_string());
+        if homeo.curiosity > 0.5 {
+            state.insert("curious".into());
         }
 
         if dopamine > 0.6 {
-            state.insert("reward_signal".to_string());
+            state.insert("reward_signal".into());
         }
 
-        if safety >= 0.3 && cortisol <= 0.6 {
-            state.insert("safety_met".to_string());
+        if homeo.safety >= 0.3 && cortisol <= 0.6 {
+            state.insert("safety_met".into());
+        }
+
+        // Дополнительно: серотонин влияет на кооперацию
+        if serotonin > 0.5 {
+            state.insert("serotonin_high".into());
         }
 
         state
     }
 
+    /// A* поиск плана для достижения целей
     pub fn plan(
         &self,
         target: &[&str],
         world_state: &HashSet<String>,
     ) -> Option<Vec<&'static str>> {
-        let target_goals: HashSet<String> = target.iter().map(|s| s.to_string()).collect();
+        let target_goals: HashSet<String> = target.iter().map(|s| (*s).into()).collect();
 
         let initial_pressure = (target_goals.difference(world_state).count()) as f32;
 
@@ -135,7 +201,8 @@ impl PfcPlanner {
         let mut seen: HashSet<Vec<String>> = HashSet::new();
 
         while let Some(node) = frontier.pop() {
-            let remaining: HashSet<String> = node.goals.difference(world_state).cloned().collect();
+            let remaining: HashSet<String> =
+                node.goals.difference(world_state).cloned().collect();
 
             if remaining.is_empty() {
                 let mut plan = node.plan.clone();
@@ -151,7 +218,8 @@ impl PfcPlanner {
             seen.insert(sig);
 
             for rule in &self.rules {
-                let rule_effects: HashSet<String> = rule.effects.iter().map(|s| s.to_string()).collect();
+                let rule_effects: HashSet<String> =
+                    rule.effects.iter().map(|s| (*s).into()).collect();
                 if rule_effects.is_disjoint(&remaining) {
                     continue;
                 }
@@ -159,12 +227,13 @@ impl PfcPlanner {
                 let next_goals: HashSet<String> = remaining
                     .difference(&rule_effects)
                     .cloned()
-                    .chain(rule.preconditions.iter().map(|s| s.to_string()))
+                    .chain(rule.preconditions.iter().map(|s| (*s).into()))
                     .filter(|g| !world_state.contains(g))
                     .collect();
 
                 let new_time = node.time_elapsed + 1.0;
-                let entropic_pressure = next_goals.len() as f32 + new_time / rule.mass.max(0.01);
+                let entropic_pressure =
+                    next_goals.len() as f32 + new_time / rule.mass.max(0.01);
 
                 let mut new_plan = node.plan.clone();
                 new_plan.push(rule.name);
@@ -181,57 +250,62 @@ impl PfcPlanner {
         None
     }
 
+    /// Определяет приоритетную цель на основе РЕАЛЬНОЙ нейрохимии
     pub fn current_top_goal(
-        &self,
-        cortisol: f32,
-        dopamine: f32,
-        safety: f32,
-        social_connection: f32,
-        curiosity: f32,
+        neuro: &NeurochemicalState,
+        homeo: &HomeostaticState,
     ) -> &'static str {
-        if safety < 0.3 || cortisol > 0.7 {
+        let cortisol = neuro.cortisol_level();
+        let dopamine = neuro.dopamine_level();
+
+        if homeo.safety < 0.3 || cortisol > 0.7 {
             return "homeostasis_stable";
         }
-        if social_connection < 0.3 {
+        if homeo.social_connection < 0.3 {
             return "cooperation_done";
         }
-        if curiosity > 0.6 && dopamine > 0.5 {
+        if homeo.curiosity > 0.6 && dopamine > 0.5 {
             return "experience_stored";
         }
         "homeostasis_stable"
     }
 
+    /// Оценка допустимости действия по нейрохимии
     pub fn evaluate_action(
-        &self,
         action: i64,
-        cortisol: f32,
-        serotonin: f32,
-        safety: f32,
+        neuro: &NeurochemicalState,
+        homeo: &HomeostaticState,
         action_social_cost: f32,
     ) -> bool {
+        let cortisol = neuro.cortisol_level();
+        let serotonin = neuro.serotonin_level();
+
+        // Высокий кортизол → запрет рискованных действий
         if cortisol > 0.8 && action == 3 {
             return false;
         }
-        if safety < 0.2 && action_social_cost > 0.5 {
+        // Низкая безопасность → запрет дорогих социально действий
+        if homeo.safety < 0.2 && action_social_cost > 0.5 {
             return false;
         }
+        // Низкий серотонин → запрет антисоциальных действий
         if serotonin < 0.2 && action_social_cost < -0.3 {
             return false;
         }
         true
     }
 
+    /// Гейтинг действия: вето/замена через PFC
     pub fn gate_action(
         &self,
         proposed: i64,
         action_dim: i64,
-        cortisol: f32,
-        serotonin: f32,
-        safety: f32,
+        neuro: &NeurochemicalState,
+        homeo: &HomeostaticState,
         action_social_costs: &HashMap<i64, f32>,
     ) -> i64 {
         let cost = action_social_costs.get(&proposed).copied().unwrap_or(0.0);
-        if self.evaluate_action(proposed, cortisol, serotonin, safety, cost) {
+        if Self::evaluate_action(proposed, neuro, homeo, cost) {
             return proposed;
         }
 
@@ -240,7 +314,7 @@ impl PfcPlanner {
                 continue;
             }
             let alt_cost = action_social_costs.get(&alt).copied().unwrap_or(0.0);
-            if self.evaluate_action(alt, cortisol, serotonin, safety, alt_cost) {
+            if Self::evaluate_action(alt, neuro, homeo, alt_cost) {
                 return alt;
             }
         }
