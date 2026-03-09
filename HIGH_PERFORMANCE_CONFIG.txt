@@ -1,0 +1,185 @@
+HIGH-PERFORMANCE CONFIGURATION
+AMD 9950X + 172GB RAM + Radeon PRO R9700 32GB VRAM
+
+RECOMMENDED SETTINGS:
+
+1. TRAINING SCALE:
+   const NUM_STEPS: usize = 10_000_000;  // 10M steps
+   const LOG_INTERVAL: usize = 50_000;
+   const SAVE_INTERVAL: usize = 500_000;
+
+2. ENVIRONMENT:
+   - World size: 100x100 or 200x200
+   - Agents: 50-100 agents
+   - Multiple environments in parallel
+
+3. BATCH SIZES (increase in update methods):
+   - Episodic memory: 100,000 episodes
+   - Batch size: 512-1024 (current is tiny)
+   - Replay buffer: use full 172GB RAM
+
+4. GPU ACCELERATION (AMD):
+
+   For ROCm (AMD GPU support):
+   
+   a) Download LibTorch directly (NOT PyTorch):
+   ```bash
+   cd ~
+   wget https://download.pytorch.org/libtorch/rocm7.2/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Brocm7.2.zip
+   unzip libtorch-cxx11-abi-shared-with-deps-2.6.0+rocm7.2.zip
+   ```
+
+   b) Build tch-rs with ROCm:
+   ```bash
+   export LIBTORCH_USE_PYTORCH=1
+   export LIBTORCH=$(python3 -c "import torch; print(torch.__path__[0])")
+   cargo build --release
+   ```
+
+   c) In code, replace Device::Cpu with Device::Cuda(0):
+   ```rust
+   let mut vs = VarStore::new(Device::Cuda(0)); // GPU
+   ```
+
+   NOTE: tch-rs uses "Cuda" enum even for ROCm. ROCm maps CUDA calls to ROCm hardware.
+   We download LibTorch C++ library directly, NOT PyTorch Python package.
+
+EXTREME SCALE CONFIGURATION:
+
+```rust
+const NUM_STEPS: usize = 10_000_000;      // 10M steps
+const NUM_AGENTS: usize = 100;             // 100 agents
+const WORLD_SIZE: (i32, i32) = (200, 200); // 200x200 world
+const MEMORY_SIZE: usize = 1_000_000;      // 1M episode buffer
+const BATCH_SIZE: usize = 1024;            // Large batches for GPU
+const HIDDEN_DIM: i64 = 256;               // Larger networks
+const NUM_SKILLS: usize = 16;              // More skills for HRL
+```
+
+PARALLELIZATION:
+
+Your 16-core CPU can run multiple environments:
+
+```rust
+use rayon::prelude::*;
+
+// Parallel environment stepping
+let results: Vec<_> = (0..NUM_PARALLEL_ENVS)
+    .into_par_iter()
+    .map(|env_id| {
+        // Each thread runs separate environment
+        run_environment(env_id)
+    })
+    .collect();
+```
+
+MEMORY USAGE ESTIMATE (100 agents, 10M steps):
+
+- Model weights: ~2-5GB (100 agents × 50MB each)
+- Replay buffers: ~50-100GB (1M episodes × 100 agents)
+- Activations during training: ~10-20GB
+- Total: ~60-125GB (well within 172GB)
+
+VRAM USAGE (32GB):
+
+With Device::Cuda(0):
+- All model weights on GPU: ~2-5GB
+- Batch computations: ~5-10GB
+- Total: ~7-15GB (plenty of headroom)
+
+RECOMMENDED APPROACH:
+
+Phase 1 (Test GPU setup):
+```rust
+const NUM_STEPS: usize = 100_000;
+const NUM_AGENTS: usize = 10;
+let mut vs = VarStore::new(Device::Cuda(0));
+```
+
+Phase 2 (Scale up):
+```rust
+const NUM_STEPS: usize = 1_000_000;
+const NUM_AGENTS: usize = 50;
+```
+
+Phase 3 (Full scale):
+```rust
+const NUM_STEPS: usize = 10_000_000;
+const NUM_AGENTS: usize = 100;
+const WORLD_SIZE: (i32, i32) = (200, 200);
+```
+
+TRAINING TIME ESTIMATES:
+
+With GPU acceleration:
+- 1M steps: ~30 minutes - 2 hours
+- 10M steps: ~5-20 hours
+- 100M steps: ~2-7 days
+
+Without GPU (CPU only):
+- 1M steps: ~5-15 hours
+- 10M steps: ~2-6 days
+
+MULTI-GPU (if you add more GPUs):
+
+```rust
+let devices = vec![Device::Cuda(0), Device::Cuda(1)];
+// Distribute agents across GPUs
+for (i, agent) in agents.iter_mut().enumerate() {
+    let device = devices[i % devices.len()];
+    agent.vs = VarStore::new(device);
+}
+```
+
+MONITORING:
+
+Add real-time monitoring:
+
+```rust
+use std::time::Instant;
+
+let start = Instant::now();
+let mut steps_per_sec_history = vec![];
+
+if step % LOG_INTERVAL == 0 {
+    let elapsed = start.elapsed().as_secs_f32();
+    let steps_per_sec = step as f32 / elapsed;
+    steps_per_sec_history.push(steps_per_sec);
+    
+    println!("Steps/sec: {:.1}, ETA: {:.1} hours", 
+             steps_per_sec,
+             (NUM_STEPS - step) as f32 / steps_per_sec / 3600.0);
+}
+```
+
+ROCM COMPATIBILITY CHECK:
+
+Before starting, verify ROCm:
+
+```bash
+rocm-smi  # Check GPU
+rocminfo  # Check ROCm installation
+```
+
+If ROCm is not installed:
+```bash
+# Ubuntu/Debian
+wget https://repo.radeon.com/amdgpu-install/latest/ubuntu/jammy/amdgpu-install_*.deb
+sudo apt install ./amdgpu-install_*.deb
+sudo amdgpu-install --usecase=rocm
+```
+
+YOUR BOTTLENECK:
+
+With your hardware, bottleneck is likely:
+1. Not GPU/CPU - you have plenty
+2. Algorithm efficiency / training dynamics
+3. Potentially: disk I/O for checkpoints (use SSD/NVMe)
+
+DISK I/O OPTIMIZATION:
+
+```rust
+const SAVE_INTERVAL: usize = 1_000_000;  // Less frequent saves
+// Or save to RAM disk
+let checkpoint_path = "/dev/shm/checkpoints/...";  // Linux RAM disk
+```

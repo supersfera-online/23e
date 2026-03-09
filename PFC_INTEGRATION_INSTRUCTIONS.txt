@@ -1,0 +1,95 @@
+PFC PLANNER INTEGRATION - USAGE INSTRUCTIONS
+
+FILES:
+1. pfc_planner.rs - PFC Planner module (Goal-Oriented Action Planning)
+2. FINAL_INTEGRATION_with_pfc.rs - Updated FINAL_INTEGRATION.rs with PFC integration
+
+WHAT WAS ADDED:
+
+1. PFC Planner Module (pfc_planner.rs):
+   - ValueRule: GOAP rules with preconditions, effects, and mass
+   - SearchNode: A* search for hierarchical planning
+   - PfcPlanner: Prefrontal cortex planner that derives goals from neurochemistry/homeostasis
+   
+2. Integration in FINAL_INTEGRATION.rs:
+   - Added fields to PersonalityAgent:
+     * pfc_planner: PfcPlanner
+     * action_social_costs: HashMap<i64, f32>
+   
+   - Initialized in PersonalityAgent::new():
+     * Default personality with 8 value rules
+     * Social costs for 4 actions (0: neutral, 1: positive, 2: mildly negative, 3: high cost)
+   
+   - Added gating in choose_action():
+     * After ToM processing, before returning action
+     * Gates action based on neurochemistry (cortisol, serotonin) and homeostasis (safety)
+     * Only applies when use_hierarchical or use_meta_learning is true
+
+HOW IT WORKS:
+
+The PFC Planner implements hierarchical goal planning based on current neurochemical state:
+
+1. derive_world_state() - Converts neurochemistry + homeostasis to symbolic state:
+   - safety < 0.3 → "unsafe"
+   - social_connection < 0.3 → "isolated"
+   - cortisol > 0.6 → "under_threat"
+   - curiosity > 0.5 → "curious"
+   - dopamine > 0.6 → "reward_signal"
+
+2. current_top_goal() - Selects priority goal:
+   - High cortisol or low safety → "homeostasis_stable"
+   - Low social connection → "cooperation_done"
+   - High curiosity + dopamine → "experience_stored"
+
+3. plan() - A* search to find action sequence satisfying goal
+
+4. gate_action() - Veto/modify actions that violate constraints:
+   - cortisol > 0.8 → block risky action (action 3)
+   - safety < 0.2 → block high social cost actions
+   - serotonin < 0.2 → block antisocial actions
+
+VALUE RULES (default personality):
+- meet_safety_need: unsafe → safety_met (mass 2.0)
+- seek_social_bond: isolated → social_met (mass 1.5)
+- reduce_stress: under_threat → stress_reduced (mass 2.5)
+- explore_novelty: curious + safe → knowledge_gained (mass 1.0)
+- exploit_reward: reward_signal → reward_obtained (mass 1.0)
+- cooperate: social_met → cooperation_done (mass 1.2)
+- consolidate_memory: knowledge_gained → experience_stored (mass 0.8)
+- restore_homeostasis: stress_reduced + safety_met → homeostasis_stable (mass 3.0)
+
+USAGE:
+
+To use in your project:
+1. Place pfc_planner.rs in the same directory as FINAL_INTEGRATION.rs
+2. Replace FINAL_INTEGRATION.rs with FINAL_INTEGRATION_with_pfc.rs
+3. Compile and run
+
+Optional - Add explicit goal planning in choose_action():
+```rust
+let world_state = PfcPlanner::derive_world_state(
+    self.neurochemistry.cortisol,
+    self.neurochemistry.dopamine,
+    self.neurochemistry.serotonin,
+    self.homeostasis.safety,
+    self.homeostasis.social_connection,
+    self.homeostasis.curiosity,
+);
+let top_goal = self.pfc_planner.current_top_goal(
+    self.neurochemistry.cortisol,
+    self.neurochemistry.dopamine,
+    self.homeostasis.safety,
+    self.homeostasis.social_connection,
+    self.homeostasis.curiosity,
+);
+if let Some(plan) = self.pfc_planner.plan(&[top_goal], &world_state) {
+    // plan[0] is next qualitative step
+    println!("Next planned action: {}", plan[0]);
+}
+```
+
+SCIENTIFIC BASIS:
+- Prefrontal cortex: executive control, goal planning, action gating
+- GOAP: Goal-Oriented Action Planning from game AI
+- Neurochemical gating: cortisol/serotonin modulation of action selection
+- Homeostatic drives: safety, social, curiosity as intrinsic motivations

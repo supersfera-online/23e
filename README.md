@@ -8,9 +8,11 @@ This project tests the hypothesis that **personality emerges as an adaptive cons
 
 ## System Specifications
 
-### Hardware Requirements
-- **Recommended:** AMD Ryzen 9950X (16c/32t), 128GB+ RAM, AMD Radeon PRO R9700 32GB VRAM
-- **Minimum:** 8-core CPU, 64GB RAM, 16GB VRAM or CPU-only
+### Hardware Specifications
+- **CPU:** AMD Ryzen 9950X (16 cores / 32 threads)
+- **RAM:** 172GB
+- **GPU:** AMD Radeon PRO R9700 32GB VRAM (gfx1201)
+- **ROCm:** 7.2
 
 ### Current Configuration
 - **Training Steps:** 50,000,000 (50M)
@@ -21,8 +23,7 @@ This project tests the hypothesis that **personality emerges as an adaptive cons
 - **GPU:** ROCm 7.2+ (AMD only, no CUDA/NVIDIA support)
 
 ### Expected Training Time
-- **With GPU (R9700 32GB):** 18-45 hours
-- **CPU-only:** 3-7 days
+- **With R9700 GPU:** 18-45 hours
 
 ## Architecture
 
@@ -132,7 +133,7 @@ sudo usermod -aG render,video $USER
 ```bash
 rocm-smi
 rocminfo | grep "Name:"
-# Expected: gfx1201 (R9700) or gfx1100 (W7900)
+# Expected: gfx1201 (R9700)
 ```
 
 #### 6. Enable Internet [0.1]
@@ -357,10 +358,6 @@ const BATCH_SIZE: usize = 4096; // Larger batches for GPU
 # Set GPU override for gfx1201 (R9700)
 export HSA_OVERRIDE_GFX_VERSION=12.0.1
 cargo run --release
-
-# Or for gfx1100 (W7900)
-export HSA_OVERRIDE_GFX_VERSION=11.0.0
-cargo run --release
 ```
 
 ### Out of VRAM
@@ -584,3 +581,4 @@ cargo build --release
 cargo run --release
 ```
 
+**Total complexity: 33.8 | Steps: 16 | Training time: 18-45 hours (R9700 GPU)**

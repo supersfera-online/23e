@@ -1,10 +1,10 @@
 EXTREME SCALE CONFIGURATION
-AMD 9950X (16c/32t) + 192GB RAM + Radeon PRO W7900 32GB
+AMD 9950X (16c/32t) + 172GB RAM + Radeon PRO R9700 32GB
 
 HARDWARE UTILIZATION:
 
 CPU: 16 cores → 8-16 parallel environments
-RAM: 192GB → massive replay buffers
+RAM: 172GB → massive replay buffers
 GPU: 32GB VRAM → all models on GPU + large batches
 
 CONFIGURATION LEVELS:
@@ -22,7 +22,7 @@ Expected time: 12-36 hours
 RAM usage: ~80GB
 VRAM usage: ~15GB
 
-=== LEVEL 2: AGGRESSIVE (3-7 days) ===
+=== LEVEL 2: AGGRESSIVE (18-45 hours) ===
 const NUM_STEPS: usize = 50_000_000;
 const NUM_AGENTS: usize = 100;
 const WORLD_SIZE: (i32, i32) = (200, 200);
@@ -31,7 +31,7 @@ const MEMORY_SIZE: usize = 2_000_000;
 const HIDDEN_DIM: i64 = 512;
 const NUM_SKILLS: usize = 32;
 
-Expected time: 3-7 days
+Expected time: 18-45 hours (R9700 GPU)
 RAM usage: ~150GB
 VRAM usage: ~25GB
 
@@ -50,10 +50,11 @@ VRAM usage: ~30GB
 
 GPU SETUP (CRITICAL):
 
-1. Install ROCm:
+1. Install ROCm 6.3:
 ```bash
 sudo apt update
 sudo apt install rocm-hip-sdk rocm-libs
+# Or use amdgpu-install for latest
 ```
 
 2. Verify GPU:
@@ -62,11 +63,16 @@ rocm-smi
 rocminfo | grep "Name:"
 ```
 
-3. Install PyTorch with ROCm:
+3. Download LibTorch directly (NOT PyTorch):
 ```bash
-pip3 install torch --index-url https://download.pytorch.org/whl/rocm6.2
-python3 -c "import torch; print(torch.cuda.is_available())"
+cd ~
+wget https://download.pytorch.org/libtorch/rocm7.2/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Brocm7.2.zip
+unzip libtorch-cxx11-abi-shared-with-deps-2.6.0+rocm7.2.zip
+export LIBTORCH=$HOME/libtorch
+ls $LIBTORCH/lib/libtorch.so  # Verify
 ```
+
+Note: We need LibTorch C++ library, NOT PyTorch Python package.
 
 4. Build tch-rs with ROCm:
 Add to .cargo/config.toml:
@@ -285,7 +291,7 @@ TROUBLESHOOTING:
 
 GPU not detected:
 ```bash
-HSA_OVERRIDE_GFX_VERSION=11.0.0 cargo run --release
+HSA_OVERRIDE_GFX_VERSION=12.0.1 cargo run --release
 ```
 
 Out of VRAM:

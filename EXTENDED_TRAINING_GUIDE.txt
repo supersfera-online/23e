@@ -1,0 +1,153 @@
+EXTENDED TRAINING CONFIGURATION - 50K STEPS
+
+CHANGES MADE:
+
+1. TRAINING DURATION:
+   - Increased from 10 steps → 50,000 steps
+   - LOG_INTERVAL: 1,000 steps (progress updates)
+   - SAVE_INTERVAL: 10,000 steps (checkpoints)
+
+2. ENVIRONMENT COMPLEXITY:
+   - World size: 10x10 → 20x20 grid
+   - Number of agents: 3 → 5 agents
+   
+3. AGENT CONFIGURATIONS:
+   - Agent 0: HRL + ToM (Hierarchical RL + Theory of Mind)
+   - Agent 1: Meta-Learning only
+   - Agent 2: Baseline Actor-Critic
+   - Agent 3: HRL + Meta-Learning + ToM (Full system)
+   - Agent 4: HRL only
+
+4. CHECKPOINTING:
+   - Auto-saves every 10k steps → checkpoints/agent_X_step_Y.pt
+   - Final weights saved → checkpoints/agent_X_final.pt
+   - Creates checkpoints/ directory automatically
+
+5. CHECKPOINT LOADING:
+   - Set environment variable LOAD_CHECKPOINT=1 to resume training
+   - Loads from checkpoints/agent_X_final.pt if exists
+
+EXPECTED TRAINING TIME:
+
+With current setup (CPU, no GPU acceleration):
+- ~50k steps ≈ 2-6 hours (depends on CPU)
+- Each step: state updates + forward passes + gradient updates
+- 5 agents × 50k steps = 250k total agent steps
+
+RUNNING THE SIMULATION:
+
+1. First run (from scratch):
+   ```bash
+   cargo run --release
+   ```
+
+2. Resume from checkpoint:
+   ```bash
+   LOAD_CHECKPOINT=1 cargo run --release
+   ```
+
+3. Longer training (100k steps):
+   Edit FINAL_INTEGRATION.rs:
+   ```rust
+   const NUM_STEPS: usize = 100_000;
+   ```
+
+OUTPUT:
+
+Console output every 1000 steps:
+- Agent ID, Type, Last Action
+- Neurochemistry: Dopamine, Serotonin, Cortisol
+- Homeostasis: Safety, Social Connection
+- Current Skill (for HRL agents)
+
+Example:
+```
+--- STEP 10000 / 50000 ---
+Agent 0: Type=HRL, Action=2, DA=0.65, 5HT=0.72, Cort=0.23, Safety=0.81, Social=0.54, Skill=2
+Agent 1: Type=MetaL, Action=1, DA=0.58, 5HT=0.68, Cort=0.31, Safety=0.73, Social=0.62, Skill=None
+...
+Saved checkpoint: checkpoints/agent_0_step_10000.pt
+```
+
+ANALYZING RESULTS:
+
+After training completes, you'll have:
+1. Final weights in checkpoints/agent_X_final.pt
+2. Console logs showing neurochemical/homeostatic dynamics
+3. Behavioral patterns emerging from different architectures
+
+WHAT TO LOOK FOR:
+
+1. Stable homeostasis (safety, social connection converging)
+2. Neurochemical adaptation (dopamine/serotonin stabilizing)
+3. Different behavioral patterns between agent types
+4. Social interactions between agents
+5. Skill switching patterns (HRL agents)
+6. ToM cooperation events
+
+INCREASING COMPLEXITY FURTHER:
+
+To scale to 100k-1M steps:
+
+1. Increase NUM_STEPS:
+   ```rust
+   const NUM_STEPS: usize = 1_000_000;
+   const LOG_INTERVAL: usize = 10_000;
+   const SAVE_INTERVAL: usize = 50_000;
+   ```
+
+2. Add more agents (6-10):
+   ```rust
+   let agent5 = PersonalityAgent::new(5, true, true, false);
+   // etc.
+   ```
+
+3. Larger world (50x50 or 100x100):
+   ```rust
+   let world = GridWorld::new((50, 50));
+   ```
+
+4. Add obstacles/resources in GridWorld
+
+5. Use GPU acceleration:
+   ```rust
+   let mut vs = VarStore::new(Device::Cuda(0));
+   ```
+
+MEMORY USAGE:
+
+Current setup (5 agents, 50k steps):
+- ~500MB-2GB RAM (depends on batch sizes)
+- Checkpoints: ~50-100MB per agent
+- Total disk space: ~500MB-1GB for all checkpoints
+
+For 1M steps:
+- Scale proportionally
+- Consider clearing old checkpoints to save space
+
+TROUBLESHOOTING:
+
+1. Out of memory:
+   - Reduce batch sizes in update() methods
+   - Reduce number of agents
+   - Clear episodic memory more frequently
+
+2. Slow training:
+   - Use --release flag
+   - Enable GPU if available
+   - Reduce LOG_INTERVAL printing
+
+3. Checkpoints not saving:
+   - Ensure checkpoints/ directory exists
+   - Check disk space
+   - Verify write permissions
+
+SCIENTIFIC OBSERVATIONS:
+
+Track these metrics manually or add logging:
+1. Homeostatic stability: variance of safety/social over time
+2. Neurochemical patterns: dopamine/serotonin trajectories
+3. Social network: frequency of agent interactions
+4. Skill specialization: which skills each HRL agent prefers
+5. ToM accuracy: prediction success rate
+6. Behavioral diversity: entropy of action distributions

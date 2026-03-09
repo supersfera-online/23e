@@ -7,12 +7,10 @@ use pfc_planner::PfcPlanner;
 
 const STATE_DIM: i64 = 6;
 const ACTION_DIM: i64 = 4;
-const NUM_SKILLS: usize = 32;
-const HIDDEN_DIM: i64 = 512;
+const NUM_SKILLS: usize = 4;
+const HIDDEN_DIM: i64 = 64;
 const LR: f64 = 1e-4;
 const GAMMA: f64 = 0.99;
-const BATCH_SIZE: usize = 2048;
-const MEMORY_SIZE: usize = 2_000_000;
 
 pub type State = Tensor;
 pub type Action = i64;
@@ -59,43 +57,12 @@ impl Default for HomeostaticState {
     }
 }
 
-use std::collections::VecDeque;
-
-pub struct EpisodicMemory {
-    buffer: VecDeque<Episode>,
-    max_size: usize,
-}
+pub struct EpisodicMemory;
 
 impl EpisodicMemory {
-    pub fn new() -> Self { 
-        EpisodicMemory {
-            buffer: VecDeque::with_capacity(MEMORY_SIZE),
-            max_size: MEMORY_SIZE,
-        }
-    }
-    
-    pub fn add_experience(&mut self, episode: Episode) {
-        if self.buffer.len() >= self.max_size {
-            self.buffer.pop_front();
-        }
-        self.buffer.push_back(episode);
-    }
-    
-    pub fn sample_batch(&self, batch_size: usize) -> Vec<Episode> {
-        use rand::seq::SliceRandom;
-        if self.buffer.len() < batch_size {
-            return self.buffer.iter().cloned().collect();
-        }
-        self.buffer.iter()
-            .choose_multiple(&mut thread_rng(), batch_size)
-            .into_iter()
-            .cloned()
-            .collect()
-    }
-    
-    pub fn len(&self) -> usize {
-        self.buffer.len()
-    }
+    pub fn new() -> Self { EpisodicMemory }
+    pub fn add_experience(&mut self, _episode: Episode) {}
+    pub fn sample_batch(&self, _batch_size: usize) -> Vec<Episode> { vec![] }
 }
 
 pub struct ActorCritic {
@@ -311,7 +278,7 @@ impl TheoryOfMind {
 
     pub fn observe_other_agent(&mut self, other_id: usize, state: &State, action: Action) {
         if !self.other_models.contains_key(&other_id) {
-            let mut vs = VarStore::new(Device::cuda_if_available());
+            let mut vs = VarStore::new(Device::Cpu);
             self.other_models.insert(other_id, OtherAgentModel::new(&vs.root(), other_id));
         }
     }
@@ -349,8 +316,7 @@ pub struct PersonalityAgent {
 
 impl PersonalityAgent {
     pub fn new(id: usize, use_h: bool, use_m: bool, use_t: bool) -> Self {
-        let device = Device::cuda_if_available();
-        let mut vs = VarStore::new(device);
+        let mut vs = VarStore::new(Device::Cpu);
         let root = nn::Path::new(&mut vs, &format!("agent_{}", id));
 
         let meta_controller = MetaController::new(&root.sub("hrl"), STATE_DIM, NUM_SKILLS);
@@ -551,114 +517,81 @@ impl MultiAgentWorld {
 }
 
 fn main() {
-    println!("=== EXTREME SCALE: 50M steps, 100 agents, 200x200 world ===");
-    println!("Hardware: AMD 9950X + 172GB RAM + Radeon PRO R9700 32GB");
-    
-    let device = Device::cuda_if_available();
-    println!("Device: {:?}", device);
+    println!("--- Neurochemical Personality Simulation: Extended Training (50k steps) ---");
     
     std::fs::create_dir_all("checkpoints").unwrap();
     
-    let mut agents: Vec<PersonalityAgent> = (0..100)
-        .map(|i| {
-            let use_hierarchical = i % 3 == 0;
-            let use_meta_learning = i % 3 == 1;
-            let use_tom = i % 2 == 0;
-            PersonalityAgent::new(i, use_hierarchical, use_meta_learning, use_tom)
-        })
-        .collect();
+    let mut agent0 = PersonalityAgent::new(0, true, false, true); 
+    let mut agent1 = PersonalityAgent::new(1, false, true, false); 
+    let mut agent2 = PersonalityAgent::new(2, false, false, false);
+    let mut agent3 = PersonalityAgent::new(3, true, true, true);
+    let mut agent4 = PersonalityAgent::new(4, true, false, false);
 
     let load_checkpoint = std::env::var("LOAD_CHECKPOINT").is_ok();
     if load_checkpoint {
         println!("Loading checkpoints...");
-        for (i, agent) in agents.iter_mut().enumerate() {
+        for (i, agent) in [&mut agent0, &mut agent1, &mut agent2, &mut agent3, &mut agent4].iter_mut().enumerate() {
             let checkpoint_path = format!("checkpoints/agent_{}_final.pt", i);
             if std::path::Path::new(&checkpoint_path).exists() {
                 agent.vs.load(&checkpoint_path).unwrap();
-                println!("Loaded: agent_{}", i);
+                println!("Loaded checkpoint: {}", checkpoint_path);
             }
         }
     }
 
-    let world = GridWorld::new((200, 200));
+    let agents = vec![agent0, agent1, agent2, agent3, agent4];
+    let world = GridWorld::new((20, 20));
     let mut multi_world = MultiAgentWorld::new(agents, world);
 
-    println!("\n100 Agents initialized:");
-    println!("HRL: ~33, Meta-L: ~33, A2C: ~34");
-    println!("ToM enabled: ~50 agents");
+    println!("\nAgents Initialized:");
+    println!("Agent 0 (HRL+ToM) | Agent 1 (Meta-L) | Agent 2 (A2C) | Agent 3 (HRL+Meta+ToM) | Agent 4 (HRL)");
     
-    const NUM_STEPS: usize = 50_000_000;
-    const LOG_INTERVAL: usize = 100_000;
-    const SAVE_INTERVAL: usize = 1_000_000;
-    const STATS_INTERVAL: usize = 10_000;
-    
-    use std::time::Instant;
-    let start_time = Instant::now();
-    let mut total_social_events = 0;
+    const NUM_STEPS: usize = 50_000;
+    const LOG_INTERVAL: usize = 1_000;
+    const SAVE_INTERVAL: usize = 10_000;
     
     for step in 0..NUM_STEPS {
         multi_world.step();
 
-        if step % STATS_INTERVAL == 0 {
-            for agent in &multi_world.agents {
-                if thread_rng().gen::<f32>() < 0.01 {
-                    total_social_events += 1;
-                }
-            }
-        }
-
         if step % LOG_INTERVAL == 0 || step == NUM_STEPS - 1 {
-            let elapsed = start_time.elapsed().as_secs_f32();
-            let steps_per_sec = (step + 1) as f32 / elapsed;
-            let eta_hours = (NUM_STEPS - step) as f32 / steps_per_sec / 3600.0;
+            println!("\n--- STEP {} / {} ---", step, NUM_STEPS);
             
-            println!("\n=== STEP {}/{} ({:.1}%) ===", step, NUM_STEPS, (step as f32 / NUM_STEPS as f32) * 100.0);
-            println!("Speed: {:.1} steps/s | Elapsed: {:.1}h | ETA: {:.1}h", 
-                     steps_per_sec, elapsed / 3600.0, eta_hours);
-            
-            let avg_da: f32 = multi_world.agents.iter().map(|a| a.neurochemistry.dopamine).sum::<f32>() / multi_world.agents.len() as f32;
-            let avg_5ht: f32 = multi_world.agents.iter().map(|a| a.neurochemistry.serotonin).sum::<f32>() / multi_world.agents.len() as f32;
-            let avg_cort: f32 = multi_world.agents.iter().map(|a| a.neurochemistry.cortisol).sum::<f32>() / multi_world.agents.len() as f32;
-            let avg_safety: f32 = multi_world.agents.iter().map(|a| a.homeostasis.safety).sum::<f32>() / multi_world.agents.len() as f32;
-            let avg_social: f32 = multi_world.agents.iter().map(|a| a.homeostasis.social_connection).sum::<f32>() / multi_world.agents.len() as f32;
-            
-            println!("Population avg: DA={:.3} 5HT={:.3} Cort={:.3} | Safety={:.3} Social={:.3}", 
-                     avg_da, avg_5ht, avg_cort, avg_safety, avg_social);
-            println!("Social events: {}", total_social_events);
-            
-            for i in [0, 1, 50, 99].iter() {
-                if *i < multi_world.agents.len() {
-                    let agent = &multi_world.agents[*i];
-                    let decision_type = if agent.use_hierarchical { "HRL" } 
-                                        else if agent.use_meta_learning { "MetaL" } 
-                                        else { "A2C" };
-                    let skill = agent.current_skill.map_or("N".to_string(), |id| id.to_string());
-                    println!("  A{}: {} Act={} DA={:.2} 5HT={:.2} S={}", 
-                             i, decision_type, agent.last_action, 
-                             agent.neurochemistry.dopamine, 
-                             agent.neurochemistry.serotonin, skill);
-                }
+            for i in 0..multi_world.agents.len() {
+                let agent = &multi_world.agents[i];
+                let decision_type = if agent.use_hierarchical { "HRL" } 
+                                    else if agent.use_meta_learning { "MetaL" } 
+                                    else { "A2C" };
+                
+                let skill_id = agent.current_skill.map_or("None".to_string(), |id| id.to_string());
+                
+                println!(
+                    "Agent {}: Type={}, Action={}, DA={:.2}, 5HT={:.2}, Cort={:.2}, Safety={:.2}, Social={:.2}, Skill={}",
+                    i, decision_type, agent.last_action, 
+                    agent.neurochemistry.dopamine, 
+                    agent.neurochemistry.serotonin,
+                    agent.neurochemistry.cortisol,
+                    agent.homeostasis.safety,
+                    agent.homeostasis.social_connection,
+                    skill_id
+                );
             }
         }
 
         if step % SAVE_INTERVAL == 0 && step > 0 {
-            println!("\nSaving checkpoints at step {}...", step);
             for i in 0..multi_world.agents.len() {
                 let checkpoint_path = format!("checkpoints/agent_{}_step_{}.pt", i, step);
                 multi_world.agents[i].vs.save(&checkpoint_path).unwrap_or_else(|e| {
-                    eprintln!("Failed to save agent {}: {}", i, e);
+                    eprintln!("Failed to save checkpoint for agent {}: {}", i, e);
                 });
+                println!("Saved checkpoint: {}", checkpoint_path);
             }
-            println!("Checkpoints saved for {} agents", multi_world.agents.len());
         }
     }
 
-    println!("\n=== TRAINING COMPLETE: {} steps ===", NUM_STEPS);
-    println!("Total time: {:.2} hours", start_time.elapsed().as_secs_f32() / 3600.0);
+    println!("\n--- Simulation Complete: {} steps ---", NUM_STEPS);
     
-    println!("\nSaving final weights...");
     for i in 0..multi_world.agents.len() {
         let final_path = format!("checkpoints/agent_{}_final.pt", i);
         multi_world.agents[i].vs.save(&final_path).unwrap();
+        println!("Saved final weights: {}", final_path);
     }
-    println!("Final weights saved for {} agents", multi_world.agents.len());

@@ -1,0 +1,82 @@
+QUICK START - 50K STEPS TRAINING
+
+WHAT YOU GOT:
+- FINAL_INTEGRATION_extended.rs: 5 agents, 20x20 world, 50k steps
+- Auto-checkpointing every 10k steps
+- Progress logging every 1k steps
+
+MINIMAL SETUP:
+
+1. Place files:
+   ```
+   your_project/
+   ├── Cargo.toml
+   ├── src/
+   │   ├── main.rs  (rename FINAL_INTEGRATION_extended.rs)
+   │   └── pfc_planner.rs
+   └── checkpoints/  (auto-created)
+   ```
+
+2. Cargo.toml needs:
+   ```toml
+   [dependencies]
+   tch = "0.13"
+   rand = "0.8"
+   ```
+
+3. Run:
+   ```bash
+   cargo run --release
+   ```
+
+EXPECTED OUTPUT:
+
+```
+--- Neurochemical Personality Simulation: Extended Training (50k steps) ---
+Agents Initialized:
+Agent 0 (HRL+ToM) | Agent 1 (Meta-L) | Agent 2 (A2C) | Agent 3 (HRL+Meta+ToM) | Agent 4 (HRL)
+
+--- STEP 0 / 50000 ---
+Agent 0: Type=HRL, Action=0, DA=0.50, 5HT=0.50, Cort=0.20, Safety=0.50, Social=0.50, Skill=0
+...
+
+--- STEP 1000 / 50000 ---
+...
+
+--- STEP 10000 / 50000 ---
+...
+Saved checkpoint: checkpoints/agent_0_step_10000.pt
+...
+
+--- STEP 50000 / 50000 ---
+...
+
+--- Simulation Complete: 50000 steps ---
+Saved final weights: checkpoints/agent_0_final.pt
+...
+```
+
+RESUME TRAINING:
+
+```bash
+LOAD_CHECKPOINT=1 cargo run --release
+```
+
+SCALE UP:
+
+100k steps:
+```rust
+const NUM_STEPS: usize = 100_000;
+```
+
+10 agents:
+```rust
+let agents = (0..10).map(|i| PersonalityAgent::new(i, true, true, true)).collect();
+```
+
+50x50 world:
+```rust
+let world = GridWorld::new((50, 50));
+```
+
+THAT'S IT.

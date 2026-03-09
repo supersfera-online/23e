@@ -1,8 +1,6 @@
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::cmp::Ordering;
 
-use crate::{NeurochemicalState, HomeostaticState};
-
 #[derive(Debug, Clone)]
 pub struct ValueRule {
     pub name: &'static str,
@@ -67,44 +65,48 @@ impl PfcPlanner {
             ValueRule::new("explore_novelty",     &["curious", "safe"], &["knowledge_gained"], 1.0),
             ValueRule::new("exploit_reward",      &["reward_signal"],   &["reward_obtained"],  1.0),
             ValueRule::new("cooperate",           &["social_met"],      &["cooperation_done"], 1.2),
-            ValueRule::new("consolidate_memory",  &["knowledge_gained"]                      , &["experience_stored"], 0.8),
+            ValueRule::new("consolidate_memory",  &["knowledge_gained"], &["experience_stored"], 0.8),
             ValueRule::new("restore_homeostasis", &["stress_reduced", "safety_met"], &["homeostasis_stable"], 3.0),
         ])
     }
 
     pub fn derive_world_state(
-        neurochem: &NeurochemicalState,
-        homeostasis: &HomeostaticState,
+        cortisol: f32,
+        dopamine: f32,
+        serotonin: f32,
+        safety: f32,
+        social_connection: f32,
+        curiosity: f32,
     ) -> HashSet<String> {
         let mut state = HashSet::new();
 
-        if homeostasis.safety < 0.3 {
+        if safety < 0.3 {
             state.insert("unsafe".to_string());
         } else {
             state.insert("safe".to_string());
         }
 
-        if homeostasis.social_connection < 0.3 {
+        if social_connection < 0.3 {
             state.insert("isolated".to_string());
         } else {
             state.insert("social_met".to_string());
         }
 
-        if neurochem.cortisol > 0.6 {
+        if cortisol > 0.6 {
             state.insert("under_threat".to_string());
         } else {
             state.insert("stress_reduced".to_string());
         }
 
-        if homeostasis.curiosity > 0.5 {
+        if curiosity > 0.5 {
             state.insert("curious".to_string());
         }
 
-        if neurochem.dopamine > 0.6 {
+        if dopamine > 0.6 {
             state.insert("reward_signal".to_string());
         }
 
-        if homeostasis.safety >= 0.3 && neurochem.cortisol <= 0.6 {
+        if safety >= 0.3 && cortisol <= 0.6 {
             state.insert("safety_met".to_string());
         }
 
@@ -181,16 +183,19 @@ impl PfcPlanner {
 
     pub fn current_top_goal(
         &self,
-        neurochem: &NeurochemicalState,
-        homeostasis: &HomeostaticState,
+        cortisol: f32,
+        dopamine: f32,
+        safety: f32,
+        social_connection: f32,
+        curiosity: f32,
     ) -> &'static str {
-        if homeostasis.safety < 0.3 || neurochem.cortisol > 0.7 {
+        if safety < 0.3 || cortisol > 0.7 {
             return "homeostasis_stable";
         }
-        if homeostasis.social_connection < 0.3 {
+        if social_connection < 0.3 {
             return "cooperation_done";
         }
-        if homeostasis.curiosity > 0.6 && neurochem.dopamine > 0.5 {
+        if curiosity > 0.6 && dopamine > 0.5 {
             return "experience_stored";
         }
         "homeostasis_stable"
@@ -199,17 +204,18 @@ impl PfcPlanner {
     pub fn evaluate_action(
         &self,
         action: i64,
-        neurochem: &NeurochemicalState,
-        homeostasis: &HomeostaticState,
+        cortisol: f32,
+        serotonin: f32,
+        safety: f32,
         action_social_cost: f32,
     ) -> bool {
-        if neurochem.cortisol > 0.8 && action == 3 {
+        if cortisol > 0.8 && action == 3 {
             return false;
         }
-        if homeostasis.safety < 0.2 && action_social_cost > 0.5 {
+        if safety < 0.2 && action_social_cost > 0.5 {
             return false;
         }
-        if neurochem.serotonin < 0.2 && action_social_cost < -0.3 {
+        if serotonin < 0.2 && action_social_cost < -0.3 {
             return false;
         }
         true
@@ -219,12 +225,13 @@ impl PfcPlanner {
         &self,
         proposed: i64,
         action_dim: i64,
-        neurochem: &NeurochemicalState,
-        homeostasis: &HomeostaticState,
+        cortisol: f32,
+        serotonin: f32,
+        safety: f32,
         action_social_costs: &HashMap<i64, f32>,
     ) -> i64 {
         let cost = action_social_costs.get(&proposed).copied().unwrap_or(0.0);
-        if self.evaluate_action(proposed, neurochem, homeostasis, cost) {
+        if self.evaluate_action(proposed, cortisol, serotonin, safety, cost) {
             return proposed;
         }
 
@@ -233,7 +240,7 @@ impl PfcPlanner {
                 continue;
             }
             let alt_cost = action_social_costs.get(&alt).copied().unwrap_or(0.0);
-            if self.evaluate_action(alt, neurochem, homeostasis, alt_cost) {
+            if self.evaluate_action(alt, cortisol, serotonin, safety, alt_cost) {
                 return alt;
             }
         }
